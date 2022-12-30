@@ -13,6 +13,7 @@ from http_gate import (
 from python_keywords.neofs_verbs import put_object_to_random_node
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 logger = logging.getLogger("NeoLogger")
@@ -23,10 +24,13 @@ logger = logging.getLogger("NeoLogger")
 class Test_http_object(ClusterTestBase):
     PLACEMENT_RULE = "REP 2 IN X CBF 1 SELECT 4 FROM * AS X"
 
-    @pytest.fixture(scope="class", autouse=True)
-    @allure.title("[Class/Autouse]: Prepare wallet and deposit")
-    def prepare_wallet(self, default_wallet):
-        Test_http_object.wallet = default_wallet
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
 
     @allure.title("Test Put over gRPC, Get over HTTP")
     @pytest.mark.parametrize(
@@ -34,7 +38,7 @@ class Test_http_object(ClusterTestBase):
         [pytest.lazy_fixture("simple_object_size"), pytest.lazy_fixture("complex_object_size")],
         ids=["simple object", "complex object"],
     )
-    def test_object_put_get_attributes(self, object_size: int):
+    def test_object_put_get_attributes(self, user_wallet: WalletFile, object_size: int):
         """
         Test that object can be put using gRPC interface and get using HTTP.
 
@@ -54,7 +58,7 @@ class Test_http_object(ClusterTestBase):
         """
         with allure.step("Create public container"):
             cid = create_container(
-                self.wallet,
+                user_wallet.path,
                 shell=self.shell,
                 endpoint=self.cluster.default_rpc_endpoint,
                 rule=self.PLACEMENT_RULE,
@@ -76,7 +80,7 @@ class Test_http_object(ClusterTestBase):
 
         with allure.step("Put objects using gRPC [--attributes chapter1=peace,chapter2=war]"):
             oid = put_object_to_random_node(
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 path=file_path,
                 cid=cid,
                 shell=self.shell,
@@ -87,7 +91,7 @@ class Test_http_object(ClusterTestBase):
             get_object_and_verify_hashes(
                 oid=oid,
                 file_name=file_path,
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=cid,
                 shell=self.shell,
                 nodes=self.cluster.storage_nodes,

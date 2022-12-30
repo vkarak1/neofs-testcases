@@ -21,6 +21,7 @@ from python_keywords.neofs_verbs import put_object_to_random_node
 from utility import wait_for_gc_pass_on_storage_nodes
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 logger = logging.getLogger("NeoLogger")
@@ -38,13 +39,18 @@ class TestHttpGate(ClusterTestBase):
     PLACEMENT_RULE_1 = "REP 1 IN X CBF 1 SELECT 1 FROM * AS X"
     PLACEMENT_RULE_2 = "REP 2 IN X CBF 2 SELECT 2 FROM * AS X"
 
-    @pytest.fixture(scope="class", autouse=True)
-    @allure.title("[Class/Autouse]: Prepare wallet and deposit")
-    def prepare_wallet(self, default_wallet):
-        TestHttpGate.wallet = default_wallet
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
 
     @allure.title("Test Put over gRPC, Get over HTTP")
-    def test_put_grpc_get_http(self, complex_object_size, simple_object_size):
+    def test_put_grpc_get_http(
+        self, complex_object_size, user_wallet: WalletFile, simple_object_size
+    ):
         """
         Test that object can be put using gRPC interface and get using HTTP.
 
@@ -60,7 +66,7 @@ class TestHttpGate(ClusterTestBase):
         Hashes must be the same.
         """
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE_1,
@@ -72,14 +78,14 @@ class TestHttpGate(ClusterTestBase):
 
         with allure.step("Put objects using gRPC"):
             oid_simple = put_object_to_random_node(
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 path=file_path_simple,
                 cid=cid,
                 shell=self.shell,
                 cluster=self.cluster,
             )
             oid_large = put_object_to_random_node(
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 path=file_path_large,
                 cid=cid,
                 shell=self.shell,
@@ -90,7 +96,7 @@ class TestHttpGate(ClusterTestBase):
             get_object_and_verify_hashes(
                 oid=oid,
                 file_name=file_path,
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=cid,
                 shell=self.shell,
                 nodes=self.cluster.storage_nodes,
@@ -101,7 +107,9 @@ class TestHttpGate(ClusterTestBase):
     @allure.link("https://github.com/nspcc-dev/neofs-http-gw#downloading", name="downloading")
     @allure.title("Test Put over HTTP, Get over HTTP")
     @pytest.mark.smoke
-    def test_put_http_get_http(self, complex_object_size, simple_object_size):
+    def test_put_http_get_http(
+        self, complex_object_size, user_wallet: WalletFile, simple_object_size
+    ):
         """
         Test that object can be put and get using HTTP interface.
 
@@ -115,7 +123,7 @@ class TestHttpGate(ClusterTestBase):
         Hashes must be the same.
         """
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE_2,
@@ -137,7 +145,7 @@ class TestHttpGate(ClusterTestBase):
             get_object_and_verify_hashes(
                 oid=oid,
                 file_name=file_path,
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=cid,
                 shell=self.shell,
                 nodes=self.cluster.storage_nodes,
@@ -157,7 +165,9 @@ class TestHttpGate(ClusterTestBase):
         ],
         ids=["simple", "hyphen", "percent"],
     )
-    def test_put_http_get_http_with_headers(self, attributes: dict, simple_object_size):
+    def test_put_http_get_http_with_headers(
+        self, attributes: dict, user_wallet: WalletFile, simple_object_size
+    ):
         """
         Test that object can be downloaded using different attributes in HTTP header.
 
@@ -171,7 +181,7 @@ class TestHttpGate(ClusterTestBase):
         Hashes must be the same.
         """
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE_2,
@@ -197,12 +207,12 @@ class TestHttpGate(ClusterTestBase):
         )
 
     @allure.title("Test Expiration-Epoch in HTTP header")
-    def test_expiration_epoch_in_http(self, simple_object_size):
+    def test_expiration_epoch_in_http(self, user_wallet: WalletFile, simple_object_size):
         endpoint = self.cluster.default_rpc_endpoint
         http_endpoint = self.cluster.default_http_gate_endpoint
 
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=endpoint,
             rule=self.PLACEMENT_RULE_2,
@@ -249,9 +259,9 @@ class TestHttpGate(ClusterTestBase):
                     get_via_http_gate(cid=cid, oid=oid, endpoint=http_endpoint)
 
     @allure.title("Test Zip in HTTP header")
-    def test_zip_in_http(self, complex_object_size, simple_object_size):
+    def test_zip_in_http(self, complex_object_size, user_wallet: WalletFile, simple_object_size):
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE_2,
@@ -288,13 +298,13 @@ class TestHttpGate(ClusterTestBase):
 
     @pytest.mark.long
     @allure.title("Test Put over HTTP/Curl, Get over HTTP/Curl for large object")
-    def test_put_http_get_http_large_file(self, complex_object_size):
+    def test_put_http_get_http_large_file(self, user_wallet: WalletFile, complex_object_size):
         """
         This test checks upload and download using curl with 'large' object.
         Large is object with size up to 20Mb.
         """
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE_2,
@@ -317,7 +327,7 @@ class TestHttpGate(ClusterTestBase):
         get_object_and_verify_hashes(
             oid=oid_gate,
             file_name=file_path,
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             cid=cid,
             shell=self.shell,
             nodes=self.cluster.storage_nodes,
@@ -326,7 +336,7 @@ class TestHttpGate(ClusterTestBase):
         get_object_and_verify_hashes(
             oid=oid_curl,
             file_name=file_path,
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             cid=cid,
             shell=self.shell,
             nodes=self.cluster.storage_nodes,
@@ -335,12 +345,14 @@ class TestHttpGate(ClusterTestBase):
         )
 
     @allure.title("Test Put/Get over HTTP using Curl utility")
-    def test_put_http_get_http_curl(self, complex_object_size, simple_object_size):
+    def test_put_http_get_http_curl(
+        self, complex_object_size, user_wallet: WalletFile, simple_object_size
+    ):
         """
         Test checks upload and download over HTTP using curl utility.
         """
         cid = create_container(
-            self.wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE_2,
@@ -364,7 +376,7 @@ class TestHttpGate(ClusterTestBase):
             get_object_and_verify_hashes(
                 oid=oid,
                 file_name=file_path,
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=cid,
                 shell=self.shell,
                 nodes=self.cluster.storage_nodes,

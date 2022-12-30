@@ -14,6 +14,7 @@ from python_keywords.container import (
 from utility import placement_policy_from_container
 from wellknown_acl import PRIVATE_ACL_F
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 
@@ -21,19 +22,26 @@ from steps.cluster_test_base import ClusterTestBase
 @pytest.mark.sanity
 @pytest.mark.container
 class TestContainer(ClusterTestBase):
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
+
     @pytest.mark.parametrize("name", ["", "test-container"], ids=["No name", "Set particular name"])
     @pytest.mark.smoke
-    def test_container_creation(self, default_wallet, name):
+    def test_container_creation(self, user_wallet: WalletFile, name):
         scenario_title = f"with name {name}" if name else "without name"
         allure.dynamic.title(f"User can create container {scenario_title}")
 
-        wallet = default_wallet
-        with open(wallet) as file:
+        with open(user_wallet.path) as file:
             json_wallet = json.load(file)
 
         placement_rule = "REP 2 IN X CBF 1 SELECT 2 FROM * AS X"
         cid = create_container(
-            wallet,
+            user_wallet.path,
             rule=placement_rule,
             name=name,
             shell=self.shell,
@@ -41,12 +49,12 @@ class TestContainer(ClusterTestBase):
         )
 
         containers = list_containers(
-            wallet, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+            user_wallet.path, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
         )
         assert cid in containers, f"Expected container {cid} in containers: {containers}"
 
         container_info: str = get_container(
-            wallet,
+            user_wallet.path,
             cid,
             json_mode=False,
             shell=self.shell,
@@ -79,17 +87,16 @@ class TestContainer(ClusterTestBase):
 
         with allure.step("Delete container and check it was deleted"):
             delete_container(
-                wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+                user_wallet.path, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
             )
             self.tick_epoch()
             wait_for_container_deletion(
-                wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+                user_wallet.path, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
             )
 
     @allure.title("Parallel container creation and deletion")
-    def test_container_creation_deletion_parallel(self, default_wallet):
+    def test_container_creation_deletion_parallel(self, user_wallet: WalletFile):
         containers_count = 3
-        wallet = default_wallet
         placement_rule = "REP 2 IN X CBF 1 SELECT 2 FROM * AS X"
 
         cids: list[str] = []
@@ -97,7 +104,7 @@ class TestContainer(ClusterTestBase):
             for _ in range(containers_count):
                 cids.append(
                     create_container(
-                        wallet,
+                        user_wallet.path,
                         rule=placement_rule,
                         await_mode=False,
                         shell=self.shell,
@@ -109,7 +116,7 @@ class TestContainer(ClusterTestBase):
         with allure.step(f"Wait for containers occur in container list"):
             for cid in cids:
                 wait_for_container_creation(
-                    wallet,
+                    user_wallet.path,
                     cid,
                     sleep_interval=containers_count,
                     shell=self.shell,
@@ -119,9 +126,12 @@ class TestContainer(ClusterTestBase):
         with allure.step("Delete containers and check they were deleted"):
             for cid in cids:
                 delete_container(
-                    wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+                    user_wallet.path,
+                    cid,
+                    shell=self.shell,
+                    endpoint=self.cluster.default_rpc_endpoint,
                 )
             self.tick_epoch()
             wait_for_container_deletion(
-                wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+                user_wallet.path, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
             )

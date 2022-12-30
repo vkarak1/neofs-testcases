@@ -27,17 +27,17 @@ from python_keywords.node_management import (
     drop_object,
     exclude_node_from_network_map,
     get_locode_from_random_node,
-    get_netmap_snapshot,
     include_node_to_network_map,
     node_shard_list,
     node_shard_set_mode,
-    start_storage_nodes,
     storage_node_healthcheck,
     storage_node_set_status,
 )
 from storage_policy import get_nodes_with_object, get_simple_object_copies
 from utility import parse_time, placement_policy_from_container, wait_for_gc_pass_on_storage_nodes
 from wellknown_acl import PUBLIC_ACL
+
+from helpers.wallet import WalletFactory, WalletFile
 
 logger = logging.getLogger("NeoLogger")
 check_nodes: list[StorageNode] = []
@@ -47,23 +47,31 @@ check_nodes: list[StorageNode] = []
 @pytest.mark.add_nodes
 @pytest.mark.node_mgmt
 class TestNodeManagement(ClusterTestBase):
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
+
     @pytest.fixture
     @allure.title("Create container and pick the node with data")
     def create_container_and_pick_node(
-        self, default_wallet: str, simple_object_size
+        self, user_wallet: WalletFile, simple_object_size
     ) -> Tuple[str, StorageNode]:
         file_path = generate_file(simple_object_size)
         placement_rule = "REP 1 IN X CBF 1 SELECT 1 FROM * AS X"
         endpoint = self.cluster.default_rpc_endpoint
 
         cid = create_container(
-            default_wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=endpoint,
             rule=placement_rule,
             basic_acl=PUBLIC_ACL,
         )
-        oid = put_object_to_random_node(default_wallet, file_path, cid, self.shell, self.cluster)
+        oid = put_object_to_random_node(user_wallet.path, file_path, cid, self.shell, self.cluster)
 
         nodes = get_nodes_with_object(cid, oid, shell=self.shell, nodes=self.cluster.storage_nodes)
         assert len(nodes) == 1
@@ -125,14 +133,13 @@ class TestNodeManagement(ClusterTestBase):
     @pytest.mark.add_nodes
     def test_add_nodes(
         self,
-        default_wallet,
+        user_wallet: WalletFile,
         return_nodes_after_test_run,
         simple_object_size,
     ):
         """
         This test remove one node from cluster then add it back. Test uses base control operations with storage nodes (healthcheck, netmap-snapshot, set-status).
         """
-        wallet = default_wallet
         placement_rule_3 = "REP 3 IN X CBF 1 SELECT 3 FROM * AS X"
         placement_rule_4 = "REP 4 IN X CBF 1 SELECT 4 FROM * AS X"
         source_file_path = generate_file(simple_object_size)
@@ -153,14 +160,14 @@ class TestNodeManagement(ClusterTestBase):
         delete_node_data(random_node)
 
         cid = create_container(
-            wallet,
+            user_wallet.path,
             rule=placement_rule_3,
             basic_acl=PUBLIC_ACL,
             shell=self.shell,
             endpoint=alive_node.get_rpc_endpoint(),
         )
         oid = put_object(
-            wallet,
+            user_wallet.path,
             source_file_path,
             cid,
             shell=self.shell,
@@ -192,14 +199,14 @@ class TestNodeManagement(ClusterTestBase):
 
         with allure.step("Check container could be created with new node"):
             cid = create_container(
-                wallet,
+                user_wallet.path,
                 rule=placement_rule_4,
                 basic_acl=PUBLIC_ACL,
                 shell=self.shell,
                 endpoint=alive_node.get_rpc_endpoint(),
             )
             oid = put_object(
-                wallet,
+                user_wallet.path,
                 source_file_path,
                 cid,
                 shell=self.shell,
@@ -222,14 +229,13 @@ class TestNodeManagement(ClusterTestBase):
     @pytest.mark.node_mgmt
     @allure.title("Test object copies based on placement policy")
     def test_placement_policy(
-        self, default_wallet, placement_rule, expected_copies, simple_object_size
+        self, user_wallet: WalletFile, placement_rule, expected_copies, simple_object_size
     ):
         """
         This test checks object's copies based on container's placement policy.
         """
-        wallet = default_wallet
         file_path = generate_file(simple_object_size)
-        self.validate_object_copies(wallet, placement_rule, file_path, expected_copies)
+        self.validate_object_copies(user_wallet.path, placement_rule, file_path, expected_copies)
 
     @pytest.mark.parametrize(
         "placement_rule,expected_copies,expected_nodes_id",
@@ -284,7 +290,7 @@ class TestNodeManagement(ClusterTestBase):
     @allure.title("Test object copies and storage nodes based on placement policy")
     def test_placement_policy_with_nodes(
         self,
-        default_wallet,
+        user_wallet: WalletFile,
         placement_rule,
         expected_copies,
         expected_nodes_id: set[int],
@@ -294,10 +300,9 @@ class TestNodeManagement(ClusterTestBase):
         Based on container's placement policy check that storage nodes are piked correctly and object has
         correct copies amount.
         """
-        wallet = default_wallet
         file_path = generate_file(simple_object_size)
         cid, oid, found_nodes = self.validate_object_copies(
-            wallet, placement_rule, file_path, expected_copies
+            user_wallet.path, placement_rule, file_path, expected_copies
         )
 
         assert (
@@ -313,23 +318,23 @@ class TestNodeManagement(ClusterTestBase):
     @pytest.mark.node_mgmt
     @allure.title("Negative cases for placement policy")
     def test_placement_policy_negative(
-        self, default_wallet, placement_rule, expected_copies, simple_object_size
+        self, user_wallet: WalletFile, placement_rule, expected_copies, simple_object_size
     ):
         """
         Negative test for placement policy.
         """
-        wallet = default_wallet
         file_path = generate_file(simple_object_size)
         with pytest.raises(RuntimeError, match=".*not enough nodes to SELECT from.*"):
-            self.validate_object_copies(wallet, placement_rule, file_path, expected_copies)
+            self.validate_object_copies(
+                user_wallet.path, placement_rule, file_path, expected_copies
+            )
 
     @pytest.mark.node_mgmt
     @allure.title("NeoFS object could be dropped using control command")
-    def test_drop_object(self, default_wallet, complex_object_size, simple_object_size):
+    def test_drop_object(self, user_wallet: WalletFile, complex_object_size, simple_object_size):
         """
         Test checks object could be dropped using `neofs-cli control drop-objects` command.
         """
-        wallet = default_wallet
         endpoint = self.cluster.default_rpc_endpoint
         file_path_simple, file_path_complex = generate_file(simple_object_size), generate_file(
             complex_object_size
@@ -337,17 +342,19 @@ class TestNodeManagement(ClusterTestBase):
 
         locode = get_locode_from_random_node(self.cluster)
         rule = f"REP 1 CBF 1 SELECT 1 FROM * FILTER 'UN-LOCODE' EQ '{locode}' AS LOC"
-        cid = create_container(wallet, rule=rule, shell=self.shell, endpoint=endpoint)
+        cid = create_container(user_wallet.path, rule=rule, shell=self.shell, endpoint=endpoint)
         oid_simple = put_object_to_random_node(
-            wallet, file_path_simple, cid, shell=self.shell, cluster=self.cluster
+            user_wallet.path, file_path_simple, cid, shell=self.shell, cluster=self.cluster
         )
         oid_complex = put_object_to_random_node(
-            wallet, file_path_complex, cid, shell=self.shell, cluster=self.cluster
+            user_wallet.path, file_path_complex, cid, shell=self.shell, cluster=self.cluster
         )
 
         for oid in (oid_simple, oid_complex):
-            get_object_from_random_node(wallet, cid, oid, shell=self.shell, cluster=self.cluster)
-            head_object(wallet, cid, oid, shell=self.shell, endpoint=endpoint)
+            get_object_from_random_node(
+                user_wallet.path, cid, oid, shell=self.shell, cluster=self.cluster
+            )
+            head_object(user_wallet.path, cid, oid, shell=self.shell, endpoint=endpoint)
 
         nodes_with_object = get_nodes_with_object(
             cid, oid_simple, shell=self.shell, nodes=self.cluster.storage_nodes
@@ -357,27 +364,28 @@ class TestNodeManagement(ClusterTestBase):
         for oid in (oid_simple, oid_complex):
             with allure.step(f"Drop object {oid}"):
                 get_object_from_random_node(
-                    wallet, cid, oid, shell=self.shell, cluster=self.cluster
+                    user_wallet.path, cid, oid, shell=self.shell, cluster=self.cluster
                 )
-                head_object(wallet, cid, oid, shell=self.shell, endpoint=endpoint)
+                head_object(user_wallet.path, cid, oid, shell=self.shell, endpoint=endpoint)
                 drop_object(random_node, cid, oid)
-                self.wait_for_obj_dropped(wallet, cid, oid, endpoint, get_object)
-                self.wait_for_obj_dropped(wallet, cid, oid, endpoint, head_object)
+                self.wait_for_obj_dropped(user_wallet.path, cid, oid, endpoint, get_object)
+                self.wait_for_obj_dropped(user_wallet.path, cid, oid, endpoint, head_object)
 
     @pytest.mark.node_mgmt
     @pytest.mark.skip(reason="Need to clarify scenario")
     @allure.title("Control Operations with storage nodes")
     def test_shards(
         self,
-        default_wallet,
+        user_wallet: WalletFile,
         create_container_and_pick_node,
         simple_object_size,
     ):
-        wallet = default_wallet
         file_path = generate_file(simple_object_size)
 
         cid, node = create_container_and_pick_node
-        original_oid = put_object_to_random_node(wallet, file_path, cid, self.shell, self.cluster)
+        original_oid = put_object_to_random_node(
+            user_wallet.path, file_path, cid, self.shell, self.cluster
+        )
 
         # for mode in ('read-only', 'degraded'):
         for mode in ("degraded",):
@@ -391,14 +399,22 @@ class TestNodeManagement(ClusterTestBase):
             assert shards
 
             with pytest.raises(RuntimeError):
-                put_object_to_random_node(wallet, file_path, cid, self.shell, self.cluster)
+                put_object_to_random_node(
+                    user_wallet.path, file_path, cid, self.shell, self.cluster
+                )
 
             with pytest.raises(RuntimeError):
                 delete_object(
-                    wallet, cid, original_oid, self.shell, self.cluster.default_rpc_endpoint
+                    user_wallet.path,
+                    cid,
+                    original_oid,
+                    self.shell,
+                    self.cluster.default_rpc_endpoint,
                 )
 
-            get_object_from_random_node(wallet, cid, original_oid, self.shell, self.cluster)
+            get_object_from_random_node(
+                user_wallet.path, cid, original_oid, self.shell, self.cluster
+            )
 
             for shard in shards:
                 node_shard_set_mode(node, shard, "read-write")
@@ -406,8 +422,10 @@ class TestNodeManagement(ClusterTestBase):
             shards = node_shard_list(node)
             assert shards
 
-            oid = put_object_to_random_node(wallet, file_path, cid, self.shell, self.cluster)
-            delete_object(wallet, cid, oid, self.shell, self.cluster.default_rpc_endpoint)
+            oid = put_object_to_random_node(
+                user_wallet.path, file_path, cid, self.shell, self.cluster
+            )
+            delete_object(user_wallet.path, cid, oid, self.shell, self.cluster.default_rpc_endpoint)
 
     @allure.step("Validate object has {expected_copies} copies")
     def validate_object_copies(

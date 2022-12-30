@@ -23,6 +23,7 @@ from python_keywords.neofs_verbs import delete_object
 from wellknown_acl import PUBLIC_ACL
 
 from helpers.storage_object_info import StorageObjectInfo
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 OBJECT_ALREADY_REMOVED_ERROR = "object already removed"
@@ -41,10 +42,13 @@ class Test_http_headers(ClusterTestBase):
         {obj2_keys[0]: values[0], obj2_keys[1]: values[1], obj2_keys[2]: values[2]},
     ]
 
-    @pytest.fixture(scope="class", autouse=True)
-    @allure.title("[Class/Autouse]: Prepare wallet and deposit")
-    def prepare_wallet(self, default_wallet):
-        Test_http_headers.wallet = default_wallet
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
 
     @pytest.fixture(
         params=[
@@ -54,11 +58,12 @@ class Test_http_headers(ClusterTestBase):
         ids=["simple object", "complex object"],
         scope="class",
     )
-    def storage_objects_with_attributes(self, request: FixtureRequest) -> list[StorageObjectInfo]:
+    def storage_objects_with_attributes(
+        self, user_wallet: WalletFile, request: FixtureRequest
+    ) -> list[StorageObjectInfo]:
         storage_objects = []
-        wallet = self.wallet
         cid = create_container(
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE,
@@ -74,7 +79,7 @@ class Test_http_headers(ClusterTestBase):
             )
             storage_object = StorageObjectInfo(cid, storage_object_id)
             storage_object.size = os.path.getsize(file_path)
-            storage_object.wallet_file_path = wallet
+            storage_object.wallet_file_path = user_wallet.path
             storage_object.file_path = file_path
             storage_object.attributes = attributes
 
@@ -108,7 +113,7 @@ class Test_http_headers(ClusterTestBase):
 
     @allure.title("Test get object2 with different attributes, then delete object2 and get object1")
     def test_object2_can_be_get_by_attr(
-        self, storage_objects_with_attributes: list[StorageObjectInfo]
+        self, user_wallet: WalletFile, storage_objects_with_attributes: list[StorageObjectInfo]
     ):
         """
         Test to get object2 with different attributes, then delete object2 and get object1 using 1st attribute. Note: obj1 and obj2 have the same attribute#1,
@@ -140,7 +145,7 @@ class Test_http_headers(ClusterTestBase):
                 )
         with allure.step("Delete object#2 and verify is the container deleted"):
             delete_object(
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=storage_object_2.cid,
                 oid=storage_object_2.oid,
                 shell=self.shell,
@@ -168,7 +173,7 @@ class Test_http_headers(ClusterTestBase):
 
     @allure.title("[Negative] Try to put object and get right after container is deleted")
     def test_negative_put_and_get_object3(
-        self, storage_objects_with_attributes: list[StorageObjectInfo]
+        self, user_wallet: WalletFile, storage_objects_with_attributes: list[StorageObjectInfo]
     ):
         """
         Test to attempt to put object and try to download it right after the container has been deleted
@@ -199,20 +204,20 @@ class Test_http_headers(ClusterTestBase):
             )
         with allure.step("Delete container and verify container deletion"):
             delete_container(
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=storage_object_1.cid,
                 shell=self.shell,
                 endpoint=self.cluster.default_rpc_endpoint,
             )
             self.tick_epoch()
             wait_for_container_deletion(
-                self.wallet,
+                user_wallet.path,
                 storage_object_1.cid,
                 shell=self.shell,
                 endpoint=self.cluster.default_rpc_endpoint,
             )
             assert storage_object_1.cid not in list_containers(
-                self.wallet, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
+                user_wallet.path, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint
             )
         with allure.step(
             "[Negative] Try to download (wget) object via wget with attributes [peace=peace]"

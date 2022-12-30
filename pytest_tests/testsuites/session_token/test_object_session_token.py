@@ -10,6 +10,7 @@ from neofs_testlib.utils.wallet import get_last_address_from_wallet
 from python_keywords.container import create_container
 from python_keywords.neofs_verbs import delete_object, put_object, put_object_to_random_node
 
+from helpers.wallet import WalletFile
 from steps.session_token import create_session_token
 
 
@@ -22,7 +23,7 @@ class TestDynamicObjectSession(ClusterTestBase):
         [pytest.lazy_fixture("simple_object_size"), pytest.lazy_fixture("complex_object_size")],
         ids=["simple object", "complex object"],
     )
-    def test_object_session_token(self, default_wallet, object_size):
+    def test_object_session_token(self, user_wallet: WalletFile, object_size):
         """
         Test how operations over objects are executed with a session token
 
@@ -37,8 +38,7 @@ class TestDynamicObjectSession(ClusterTestBase):
         """
 
         with allure.step("Init wallet"):
-            wallet = default_wallet
-            address = get_last_address_from_wallet(wallet, "")
+            address = get_last_address_from_wallet(user_wallet.path, "")
 
         with allure.step("Nodes Settlements"):
             (
@@ -51,7 +51,7 @@ class TestDynamicObjectSession(ClusterTestBase):
             session_token = create_session_token(
                 shell=self.shell,
                 owner=address,
-                wallet_path=wallet,
+                wallet_path=user_wallet.path,
                 wallet_password=WALLET_PASS,
                 rpc_endpoint=session_token_node.get_rpc_endpoint(),
             )
@@ -65,7 +65,7 @@ class TestDynamicObjectSession(ClusterTestBase):
                 f'EQ "{un_locode}" AS LOC_{locode}'
             )
             cid = create_container(
-                wallet,
+                user_wallet.path,
                 shell=self.shell,
                 endpoint=self.cluster.default_rpc_endpoint,
                 rule=placement_policy,
@@ -74,14 +74,14 @@ class TestDynamicObjectSession(ClusterTestBase):
         with allure.step("Put Objects"):
             file_path = generate_file(object_size)
             oid = put_object_to_random_node(
-                wallet=wallet,
+                wallet=user_wallet.path,
                 path=file_path,
                 cid=cid,
                 shell=self.shell,
                 cluster=self.cluster,
             )
             oid_delete = put_object_to_random_node(
-                wallet=wallet,
+                wallet=user_wallet.path,
                 path=file_path,
                 cid=cid,
                 shell=self.shell,
@@ -90,7 +90,7 @@ class TestDynamicObjectSession(ClusterTestBase):
 
         with allure.step("Node not in container but granted a session token"):
             put_object(
-                wallet=wallet,
+                wallet=user_wallet.path,
                 path=file_path,
                 cid=cid,
                 shell=self.shell,
@@ -98,7 +98,7 @@ class TestDynamicObjectSession(ClusterTestBase):
                 session=session_token,
             )
             delete_object(
-                wallet=wallet,
+                wallet=user_wallet.path,
                 cid=cid,
                 oid=oid_delete,
                 shell=self.shell,
@@ -109,7 +109,7 @@ class TestDynamicObjectSession(ClusterTestBase):
         with allure.step("Node in container and not granted a session token"):
             with pytest.raises(Exception, match=SESSION_NOT_FOUND):
                 put_object(
-                    wallet=wallet,
+                    wallet=user_wallet.path,
                     path=file_path,
                     cid=cid,
                     shell=self.shell,
@@ -118,7 +118,7 @@ class TestDynamicObjectSession(ClusterTestBase):
                 )
             with pytest.raises(Exception, match=SESSION_NOT_FOUND):
                 delete_object(
-                    wallet=wallet,
+                    wallet=user_wallet.path,
                     cid=cid,
                     oid=oid,
                     shell=self.shell,
@@ -129,7 +129,7 @@ class TestDynamicObjectSession(ClusterTestBase):
         with allure.step("Node not in container and not granted a session token"):
             with pytest.raises(Exception, match=SESSION_NOT_FOUND):
                 put_object(
-                    wallet=wallet,
+                    wallet=user_wallet.path,
                     path=file_path,
                     cid=cid,
                     shell=self.shell,
@@ -138,7 +138,7 @@ class TestDynamicObjectSession(ClusterTestBase):
                 )
             with pytest.raises(Exception, match=SESSION_NOT_FOUND):
                 delete_object(
-                    wallet=wallet,
+                    wallet=user_wallet.path,
                     cid=cid,
                     oid=oid,
                     shell=self.shell,

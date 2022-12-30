@@ -31,6 +31,8 @@ from python_keywords.storage_group import (
     verify_list_storage_group,
 )
 
+from helpers.wallet import WalletFactory, WalletFile
+
 logger = logging.getLogger("NeoLogger")
 deposit = 30
 
@@ -44,28 +46,18 @@ deposit = 30
 @pytest.mark.acl
 @pytest.mark.storage_group
 class TestStorageGroup(ClusterTestBase):
-    @pytest.fixture(autouse=True)
-    def prepare_two_wallets(self, default_wallet):
-        self.main_wallet = default_wallet
-        self.other_wallet = os.path.join(os.getcwd(), ASSETS_DIR, f"{str(uuid.uuid4())}.json")
-        init_wallet(self.other_wallet, WALLET_PASS)
-        if not FREE_STORAGE:
-            main_chain = self.cluster.main_chain_nodes[0]
-            deposit = 30
-            transfer_gas(
-                shell=self.shell,
-                amount=deposit + 1,
-                main_chain=main_chain,
-                wallet_to_path=self.other_wallet,
-                wallet_to_password=WALLET_PASS,
-            )
-            deposit_gas(
-                shell=self.shell,
-                amount=deposit,
-                main_chain=main_chain,
-                wallet_from_path=self.other_wallet,
-                wallet_from_password=WALLET_PASS,
-            )
+    @pytest.fixture(scope="class")
+    def main_wallet(self, wallet_factory: WalletFactory) -> WalletFile:
+        return wallet_factory.create_wallet()
+
+    @pytest.fixture(scope="class")
+    def other_wallet(self, wallet_factory: WalletFactory) -> WalletFile:
+        return wallet_factory.create_wallet()
+
+    @pytest.fixture(autouse=True, scope="class")
+    def prepare_two_wallets(self, user_wallet: WalletFile, other_wallet: WalletFile):
+        self.main_wallet = user_wallet.path
+        self.other_wallet = other_wallet.path
 
     @allure.title("Test Storage Group in Private Container")
     def test_storagegroup_basic_private_container(self, object_size, max_object_size):

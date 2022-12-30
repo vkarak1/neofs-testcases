@@ -7,7 +7,7 @@ from random import choices, sample
 import allure
 import pytest
 from aws_cli_client import AwsCliClient
-from common import ASSETS_DIR, FREE_STORAGE, WALLET_PASS
+from common import ASSETS_DIR
 from data_formatters import get_wallet_public_key
 from file_helper import concat_files, generate_file, generate_file_with_content, get_file_hash
 from neofs_testlib.utils.wallet import init_wallet
@@ -655,32 +655,6 @@ class TestS3GateObject(TestS3GateBase):
             assert got_tags_3 == [
                 {"Key": tag_key_3, "Value": str(tag_value_3)}
             ], "Tags must be the same"
-
-    @pytest.fixture
-    def prepare_two_wallets(self, default_wallet, client_shell):
-        self.main_wallet = default_wallet
-        self.main_public_key = get_wallet_public_key(self.main_wallet, WALLET_PASS)
-        self.other_wallet = os.path.join(os.getcwd(), ASSETS_DIR, f"{str(uuid.uuid4())}.json")
-        init_wallet(self.other_wallet, WALLET_PASS)
-        self.other_public_key = get_wallet_public_key(self.other_wallet, WALLET_PASS)
-
-        if not FREE_STORAGE:
-            main_chain = self.cluster.main_chain_nodes[0]
-            deposit = 30
-            transfer_gas(
-                shell=client_shell,
-                amount=deposit + 1,
-                main_chain=main_chain,
-                wallet_to_path=self.other_wallet,
-                wallet_to_password=WALLET_PASS,
-            )
-            deposit_gas(
-                shell=client_shell,
-                main_chain=main_chain,
-                amount=deposit,
-                wallet_from_path=self.other_wallet,
-                wallet_from_password=WALLET_PASS,
-            )
 
     @allure.title("Test S3: put object with ACL")
     @pytest.mark.parametrize("bucket_versioning", ["ENABLED", "SUSPENDED"])

@@ -7,6 +7,7 @@ from file_helper import generate_file
 from http_gate import get_object_and_verify_hashes, upload_via_http_gate_curl
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 logger = logging.getLogger("NeoLogger")
@@ -17,10 +18,10 @@ logger = logging.getLogger("NeoLogger")
 class Test_http_streaming(ClusterTestBase):
     PLACEMENT_RULE = "REP 2 IN X CBF 1 SELECT 4 FROM * AS X"
 
-    @pytest.fixture(scope="class", autouse=True)
-    @allure.title("[Class/Autouse]: Prepare wallet and deposit")
-    def prepare_wallet(self, default_wallet):
-        Test_http_streaming.wallet = default_wallet
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
 
     @allure.title("Test Put via pipe (steaming), Get over HTTP and verify hashes")
     @pytest.mark.parametrize(
@@ -28,7 +29,7 @@ class Test_http_streaming(ClusterTestBase):
         [pytest.lazy_fixture("complex_object_size")],
         ids=["complex object"],
     )
-    def test_object_can_be_put_get_by_streaming(self, object_size: int):
+    def test_object_can_be_put_get_by_streaming(self, user_wallet: WalletFile, object_size: int):
         """
         Test that object can be put using gRPC interface and get using HTTP.
 
@@ -43,7 +44,7 @@ class Test_http_streaming(ClusterTestBase):
         """
         with allure.step("Create public container and verify container creation"):
             cid = create_container(
-                self.wallet,
+                user_wallet.path,
                 shell=self.shell,
                 endpoint=self.cluster.default_rpc_endpoint,
                 rule=self.PLACEMENT_RULE,
@@ -62,7 +63,7 @@ class Test_http_streaming(ClusterTestBase):
             get_object_and_verify_hashes(
                 oid=oid,
                 file_name=file_path,
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=cid,
                 shell=self.shell,
                 nodes=self.cluster.storage_nodes,

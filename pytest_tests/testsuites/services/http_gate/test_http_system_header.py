@@ -17,6 +17,7 @@ from http_gate import (
 from python_keywords.neofs_verbs import get_netmap_netinfo, head_object
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 logger = logging.getLogger("NeoLogger")
@@ -35,16 +36,19 @@ NEOFS_EXIPRATION_RFC3339 = "Neofs-Expiration-RFC3339"
 class Test_http_system_header(ClusterTestBase):
     PLACEMENT_RULE = "REP 2 IN X CBF 1 SELECT 2 FROM * AS X"
 
-    @pytest.fixture(scope="class", autouse=True)
-    @allure.title("[Class/Autouse]: Prepare wallet and deposit")
-    def prepare_wallet(self, default_wallet):
-        Test_http_system_header.wallet = default_wallet
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
 
     @pytest.fixture(scope="class")
     @allure.title("Create container")
-    def user_container(self):
+    def user_container(self, user_wallet: WalletFile):
         return create_container(
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE,
@@ -53,9 +57,9 @@ class Test_http_system_header(ClusterTestBase):
 
     @pytest.fixture(scope="class")
     @allure.title("epoch_duration in seconds")
-    def epoch_duration(self) -> int:
+    def epoch_duration(self, user_wallet: WalletFile) -> int:
         net_info = get_netmap_netinfo(
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             endpoint=self.cluster.default_rpc_endpoint,
             shell=self.shell,
         )
@@ -111,7 +115,9 @@ class Test_http_system_header(ClusterTestBase):
         ), f"Only {EXPIRATION_EXPIRATION_RFC} can be displayed in header attributes"
 
     @allure.title("Put / get / verify object and return head command result to invoker")
-    def oid_header_info_for_object(self, file_path: str, attributes: dict, user_container: str):
+    def oid_header_info_for_object(
+        self, file_path: str, user_wallet: WalletFile, attributes: dict, user_container: str
+    ):
         oid = upload_via_http_gate_curl(
             cid=user_container,
             filepath=file_path,
@@ -121,14 +127,14 @@ class Test_http_system_header(ClusterTestBase):
         get_object_and_verify_hashes(
             oid=oid,
             file_name=file_path,
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             cid=user_container,
             shell=self.shell,
             nodes=self.cluster.storage_nodes,
             endpoint=self.cluster.default_http_gate_endpoint,
         )
         head = head_object(
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             cid=user_container,
             oid=oid,
             shell=self.shell,

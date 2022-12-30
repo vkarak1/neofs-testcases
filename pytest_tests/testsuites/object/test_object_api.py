@@ -28,6 +28,7 @@ from python_keywords.neofs_verbs import (
 from python_keywords.storage_policy import get_complex_object_copies, get_simple_object_copies
 
 from helpers.storage_object_info import StorageObjectInfo
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 from steps.storage_object import delete_objects
 
@@ -90,17 +91,27 @@ def generate_ranges(
 
 
 @pytest.fixture(
+    scope="module",
+)
+def user_wallet(wallet_factory: WalletFactory):
+    with allure.step("Create user wallet with container"):
+        wallet_file = wallet_factory.create_wallet()
+        return wallet_file
+
+
+@pytest.fixture(
     params=[pytest.lazy_fixture("simple_object_size"), pytest.lazy_fixture("complex_object_size")],
     ids=["simple object", "complex object"],
     # Scope session to upload/delete each files set only once
     scope="module",
 )
 def storage_objects(
-    default_wallet: str, client_shell: Shell, cluster: Cluster, request: FixtureRequest
+    user_wallet: WalletFile, client_shell: Shell, cluster: Cluster, request: FixtureRequest
 ) -> list[StorageObjectInfo]:
-    wallet = default_wallet
     # Separate containers for complex/simple objects to avoid side-effects
-    cid = create_container(wallet, shell=client_shell, endpoint=cluster.default_rpc_endpoint)
+    cid = create_container(
+        user_wallet.path, shell=client_shell, endpoint=cluster.default_rpc_endpoint
+    )
 
     file_path = generate_file(request.param)
     file_hash = get_file_hash(file_path)
@@ -111,7 +122,7 @@ def storage_objects(
         # We need to upload objects multiple times with different attributes
         for attributes in OBJECT_ATTRIBUTES:
             storage_object_id = put_object_to_random_node(
-                wallet=wallet,
+                wallet=user_wallet.path,
                 path=file_path,
                 cid=cid,
                 shell=client_shell,
@@ -121,7 +132,7 @@ def storage_objects(
 
             storage_object = StorageObjectInfo(cid, storage_object_id)
             storage_object.size = request.param
-            storage_object.wallet_file_path = wallet
+            storage_object.wallet_file_path = user_wallet.path
             storage_object.file_path = file_path
             storage_object.file_hash = file_hash
             storage_object.attributes = attributes
@@ -269,7 +280,7 @@ class TestObjectApi(ClusterTestBase):
         ids=["simple object", "complex object"],
     )
     def test_object_search_should_return_tombstone_items(
-        self, default_wallet: str, request: FixtureRequest, object_size: int
+        self, user_wallet: WalletFile, request: FixtureRequest, object_size: int
     ):
         """
         Validate object search with removed items
@@ -278,8 +289,7 @@ class TestObjectApi(ClusterTestBase):
             f"Validate object search with removed items for {request.node.callspec.id}"
         )
 
-        wallet = default_wallet
-        cid = create_container(wallet, self.shell, self.cluster.default_rpc_endpoint)
+        cid = create_container(user_wallet.path, self.shell, self.cluster.default_rpc_endpoint)
 
         with allure.step("Upload file"):
             file_path = generate_file(object_size)
@@ -287,9 +297,11 @@ class TestObjectApi(ClusterTestBase):
 
             storage_object = StorageObjectInfo(
                 cid=cid,
-                oid=put_object_to_random_node(wallet, file_path, cid, self.shell, self.cluster),
+                oid=put_object_to_random_node(
+                    user_wallet.path, file_path, cid, self.shell, self.cluster
+                ),
                 size=object_size,
-                wallet_file_path=wallet,
+                wallet_file_path=user_wallet.path,
                 file_path=file_path,
                 file_hash=file_hash,
             )
@@ -297,7 +309,11 @@ class TestObjectApi(ClusterTestBase):
         with allure.step("Search object"):
             # Root Search object should return root object oid
             result = search_object(
-                wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint, root=True
+                user_wallet.path,
+                cid,
+                shell=self.shell,
+                endpoint=self.cluster.default_rpc_endpoint,
+                root=True,
             )
             assert result == [storage_object.oid]
 
@@ -307,14 +323,22 @@ class TestObjectApi(ClusterTestBase):
         with allure.step("Search deleted object with --root"):
             # Root Search object should return nothing
             result = search_object(
-                wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint, root=True
+                user_wallet.path,
+                cid,
+                shell=self.shell,
+                endpoint=self.cluster.default_rpc_endpoint,
+                root=True,
             )
             assert len(result) == 0
 
         with allure.step("Search deleted object with --phy should return only tombstones"):
             # Physical Search object should return only tombstones
             result = search_object(
-                wallet, cid, shell=self.shell, endpoint=self.cluster.default_rpc_endpoint, phy=True
+                user_wallet.path,
+                cid,
+                shell=self.shell,
+                endpoint=self.cluster.default_rpc_endpoint,
+                phy=True,
             )
             assert (
                 storage_object.tombstone in result
@@ -324,7 +348,7 @@ class TestObjectApi(ClusterTestBase):
             ), "Search result should not contain ObjectId of removed object"
             for tombstone_oid in result:
                 header = head_object(
-                    wallet,
+                    user_wallet.path,
                     cid,
                     tombstone_oid,
                     shell=self.shell,

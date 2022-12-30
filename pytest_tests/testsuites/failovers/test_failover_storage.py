@@ -11,6 +11,7 @@ from python_keywords.container import create_container
 from python_keywords.neofs_verbs import get_object, put_object_to_random_node
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 logger = logging.getLogger("NeoLogger")
@@ -43,24 +44,31 @@ def return_stopped_hosts(cluster: Cluster) -> None:
 
 @pytest.mark.failover
 class TestFailoverStorage(ClusterTestBase):
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
+
     @allure.title("Lose and return storage node's host")
     @pytest.mark.parametrize("hard_reboot", [True, False])
     @pytest.mark.failover_reboot
     def test_lose_storage_node_host(
-        self, default_wallet, hard_reboot: bool, require_multiple_hosts, simple_object_size
+        self, user_wallet: WalletFile, hard_reboot: bool, require_multiple_hosts, simple_object_size
     ):
-        wallet = default_wallet
         placement_rule = "REP 2 IN X CBF 2 SELECT 2 FROM * AS X"
         source_file_path = generate_file(simple_object_size)
         cid = create_container(
-            wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=placement_rule,
             basic_acl=PUBLIC_ACL,
         )
         oid = put_object_to_random_node(
-            wallet, source_file_path, cid, shell=self.shell, cluster=self.cluster
+            user_wallet.path, source_file_path, cid, shell=self.shell, cluster=self.cluster
         )
         nodes = wait_object_replication(
             cid, oid, 2, shell=self.shell, nodes=self.cluster.storage_nodes
@@ -83,7 +91,11 @@ class TestFailoverStorage(ClusterTestBase):
 
         with allure.step("Check object data is not corrupted"):
             got_file_path = get_object(
-                wallet, cid, oid, endpoint=new_nodes[0].get_rpc_endpoint(), shell=self.shell
+                user_wallet.path,
+                cid,
+                oid,
+                endpoint=new_nodes[0].get_rpc_endpoint(),
+                shell=self.shell,
             )
             assert get_file_hash(source_file_path) == get_file_hash(got_file_path)
 
@@ -95,7 +107,11 @@ class TestFailoverStorage(ClusterTestBase):
                 cid, oid, 2, shell=self.shell, nodes=self.cluster.storage_nodes
             )
             got_file_path = get_object(
-                wallet, cid, oid, shell=self.shell, endpoint=new_nodes[0].get_rpc_endpoint()
+                user_wallet.path,
+                cid,
+                oid,
+                shell=self.shell,
+                endpoint=new_nodes[0].get_rpc_endpoint(),
             )
             assert get_file_hash(source_file_path) == get_file_hash(got_file_path)
 
@@ -103,20 +119,19 @@ class TestFailoverStorage(ClusterTestBase):
     @pytest.mark.parametrize("sequence", [True, False])
     @pytest.mark.failover_panic
     def test_panic_storage_node_host(
-        self, default_wallet, require_multiple_hosts, sequence: bool, simple_object_size
+        self, user_wallet: WalletFile, require_multiple_hosts, sequence: bool, simple_object_size
     ):
-        wallet = default_wallet
         placement_rule = "REP 2 IN X CBF 2 SELECT 2 FROM * AS X"
         source_file_path = generate_file(simple_object_size)
         cid = create_container(
-            wallet,
+            user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=placement_rule,
             basic_acl=PUBLIC_ACL,
         )
         oid = put_object_to_random_node(
-            wallet, source_file_path, cid, shell=self.shell, cluster=self.cluster
+            user_wallet.path, source_file_path, cid, shell=self.shell, cluster=self.cluster
         )
 
         nodes = wait_object_replication(
@@ -167,6 +182,6 @@ class TestFailoverStorage(ClusterTestBase):
             )
 
         got_file_path = get_object(
-            wallet, cid, oid, shell=self.shell, endpoint=new_nodes[0].get_rpc_endpoint()
+            user_wallet.path, cid, oid, shell=self.shell, endpoint=new_nodes[0].get_rpc_endpoint()
         )
         assert get_file_hash(source_file_path) == get_file_hash(got_file_path)

@@ -11,16 +11,27 @@ from wellknown_acl import EACL_PUBLIC_READ_WRITE
 
 from helpers.container import StorageContainer, StorageContainerInfo
 from helpers.test_control import expect_not_raises
-from helpers.wallet import WalletFile
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 from steps.storage_object import StorageObjectInfo
 
 
+@pytest.fixture(
+    scope="module",
+)
+def user_wallet(wallet_factory: WalletFactory):
+    with allure.step("Create user wallet with container"):
+        wallet_file = wallet_factory.create_wallet()
+        return wallet_file
+
+
 @pytest.fixture(scope="module")
 @allure.title("Create bearer token for OTHERS with all operations allowed for all containers")
-def bearer_token_file_all_allow(default_wallet: str, client_shell: Shell, cluster: Cluster) -> str:
+def bearer_token_file_all_allow(
+    user_wallet: WalletFile, client_shell: Shell, cluster: Cluster
+) -> str:
     bearer = form_bearertoken_file(
-        default_wallet,
+        user_wallet.path,
         "",
         [
             EACLRule(operation=op, access=EACLAccess.ALLOW, role=EACLRole.OTHERS)
@@ -36,10 +47,10 @@ def bearer_token_file_all_allow(default_wallet: str, client_shell: Shell, cluste
 @pytest.fixture(scope="module")
 @allure.title("Create user container for bearer token usage")
 def user_container(
-    default_wallet: str, client_shell: Shell, cluster: Cluster, request: FixtureRequest
+    user_wallet: WalletFile, client_shell: Shell, cluster: Cluster, request: FixtureRequest
 ) -> StorageContainer:
     container_id = create_container(
-        default_wallet,
+        user_wallet.path,
         shell=client_shell,
         rule=request.param,
         basic_acl=EACL_PUBLIC_READ_WRITE,

@@ -15,6 +15,8 @@ from python_keywords.container import create_container
 from python_keywords.neofs_verbs import put_object_to_random_node
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
+
 OBJECT_COUNT = 5
 
 
@@ -36,12 +38,13 @@ class Wallets:
 
 
 @pytest.fixture(scope="module")
-def wallets(default_wallet, temp_directory, cluster: Cluster) -> Wallets:
-    other_wallets_paths = [
-        os.path.join(temp_directory, f"{str(uuid.uuid4())}.json") for _ in range(2)
-    ]
-    for other_wallet_path in other_wallets_paths:
-        init_wallet(other_wallet_path, WALLET_PASS)
+def main_wallet(wallet_factory: WalletFactory) -> WalletFile:
+    return wallet_factory.create_wallet()
+
+
+@pytest.fixture(scope="module")
+def wallets(main_wallet: WalletFile, wallet_factory: WalletFactory, cluster: Cluster) -> Wallets:
+    other_wallets_paths = [wallet_factory.create_wallet() for _ in range(2)]
 
     ir_node = cluster.ir_nodes[0]
     storage_node = cluster.storage_nodes[0]
@@ -54,7 +57,7 @@ def wallets(default_wallet, temp_directory, cluster: Cluster) -> Wallets:
 
     yield Wallets(
         wallets={
-            EACLRole.USER: [Wallet(wallet_path=default_wallet, config_path=WALLET_CONFIG)],
+            EACLRole.USER: [Wallet(wallet_path=main_wallet.path, config_path=WALLET_CONFIG)],
             EACLRole.OTHERS: [
                 Wallet(wallet_path=other_wallet_path, config_path=WALLET_CONFIG)
                 for other_wallet_path in other_wallets_paths

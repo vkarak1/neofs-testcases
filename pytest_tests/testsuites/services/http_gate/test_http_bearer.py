@@ -19,6 +19,7 @@ from python_keywords.acl import (
 )
 from wellknown_acl import PUBLIC_ACL
 
+from helpers.wallet import WalletFactory, WalletFile
 from steps.cluster_test_base import ClusterTestBase
 
 logger = logging.getLogger("NeoLogger")
@@ -29,15 +30,18 @@ logger = logging.getLogger("NeoLogger")
 class Test_http_bearer(ClusterTestBase):
     PLACEMENT_RULE = "REP 2 IN X CBF 1 SELECT 2 FROM * AS X"
 
-    @pytest.fixture(scope="class", autouse=True)
-    @allure.title("[Class/Autouse]: Prepare wallet and deposit")
-    def prepare_wallet(self, default_wallet):
-        Test_http_bearer.wallet = default_wallet
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
 
     @pytest.fixture(scope="class")
-    def user_container(self) -> str:
+    def user_container(self, user_wallet: WalletFile) -> str:
         return create_container(
-            wallet=self.wallet,
+            wallet=user_wallet.path,
             shell=self.shell,
             endpoint=self.cluster.default_rpc_endpoint,
             rule=self.PLACEMENT_RULE,
@@ -45,13 +49,13 @@ class Test_http_bearer(ClusterTestBase):
         )
 
     @pytest.fixture(scope="class")
-    def eacl_deny_for_others(self, user_container: str) -> None:
+    def eacl_deny_for_others(self, user_container: str, user_wallet: WalletFile) -> None:
         with allure.step(f"Set deny all operations for {EACLRole.OTHERS} via eACL"):
             eacl = EACLRule(
                 access=EACLAccess.DENY, role=EACLRole.OTHERS, operation=EACLOperation.PUT
             )
             set_eacl(
-                self.wallet,
+                user_wallet.path,
                 user_container,
                 create_eacl(user_container, eacl, shell=self.shell),
                 shell=self.shell,
@@ -60,10 +64,10 @@ class Test_http_bearer(ClusterTestBase):
             wait_for_cache_expired()
 
     @pytest.fixture(scope="class")
-    def bearer_token_no_limit_for_others(self, user_container: str) -> str:
+    def bearer_token_no_limit_for_others(self, user_container: str, user_wallet: WalletFile) -> str:
         with allure.step(f"Create bearer token for {EACLRole.OTHERS} with all operations allowed"):
             bearer = form_bearertoken_file(
-                self.wallet,
+                user_wallet.path,
                 user_container,
                 [
                     EACLRule(operation=op, access=EACLAccess.ALLOW, role=EACLRole.OTHERS)
@@ -76,7 +80,7 @@ class Test_http_bearer(ClusterTestBase):
             bearer_signed = f"{bearer}_signed"
             sign_bearer(
                 shell=self.shell,
-                wallet_path=self.wallet,
+                wallet_path=user_wallet.path,
                 eacl_rules_file_from=bearer,
                 eacl_rules_file_to=bearer_signed,
                 json=False,
@@ -105,6 +109,7 @@ class Test_http_bearer(ClusterTestBase):
         object_size: int,
         user_container: str,
         eacl_deny_for_others,
+        user_wallet: WalletFile,
         bearer_token_no_limit_for_others: str,
     ):
         eacl_deny_for_others
@@ -123,7 +128,7 @@ class Test_http_bearer(ClusterTestBase):
             get_object_and_verify_hashes(
                 oid=oid,
                 file_name=file_path,
-                wallet=self.wallet,
+                wallet=user_wallet.path,
                 cid=user_container,
                 shell=self.shell,
                 nodes=self.cluster.storage_nodes,

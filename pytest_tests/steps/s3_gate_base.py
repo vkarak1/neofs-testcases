@@ -21,6 +21,7 @@ from common import NEOFS_AUTHMATE_EXEC
 from neofs_testlib.shell import Shell
 from pytest import FixtureRequest
 from python_keywords.container import list_containers
+from wallet import WalletFactory, WalletFile
 
 # Disable warnings on self-signed certificate which the
 # boto library produces on requests to S3-gate in dev-env
@@ -38,19 +39,30 @@ RETRY_MODE = "standard"
 class TestS3GateBase(ClusterTestBase):
     s3_client: Any = None
 
+    @pytest.fixture(
+        scope="class",
+    )
+    def user_wallet(self, wallet_factory: WalletFactory):
+        with allure.step("Create user wallet with container"):
+            wallet_file = wallet_factory.create_wallet()
+            return wallet_file
+
     @pytest.fixture(scope="class", autouse=True)
     @allure.title("[Class/Autouse]: Create S3 client")
     def s3_client(
-        self, default_wallet, client_shell: Shell, request: FixtureRequest, cluster: Cluster
+        self,
+        user_wallet: WalletFile,
+        client_shell: Shell,
+        request: FixtureRequest,
+        cluster: Cluster,
     ) -> Any:
-        wallet = default_wallet
         s3_bearer_rules_file = f"{os.getcwd()}/robot/resources/files/s3_bearer_rules.json"
         policy = None if isinstance(request.param, str) else request.param[1]
         (cid, bucket, access_key_id, secret_access_key, owner_private_key,) = init_s3_credentials(
-            wallet, cluster, s3_bearer_rules_file=s3_bearer_rules_file, policy=policy
+            user_wallet.path, cluster, s3_bearer_rules_file=s3_bearer_rules_file, policy=policy
         )
         containers_list = list_containers(
-            wallet, shell=client_shell, endpoint=self.cluster.default_rpc_endpoint
+            user_wallet.path, shell=client_shell, endpoint=self.cluster.default_rpc_endpoint
         )
         assert cid in containers_list, f"Expected cid {cid} in {containers_list}"
 
@@ -63,7 +75,7 @@ class TestS3GateBase(ClusterTestBase):
                 access_key_id, secret_access_key, cluster.default_s3_gate_endpoint
             )
         TestS3GateBase.s3_client = client
-        TestS3GateBase.wallet = wallet
+        TestS3GateBase.wallet = user_wallet.path
 
     @pytest.fixture
     @allure.title("Create/delete bucket")
